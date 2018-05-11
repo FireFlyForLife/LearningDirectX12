@@ -244,6 +244,22 @@ void Tutorial3::OnResize( ResizeEventArgs& e )
 
 void Tutorial3::UnloadContent()
 {
+    m_CubeMesh.reset();
+    m_SphereMesh.reset();
+    m_ConeMesh.reset();
+    m_TorusMesh.reset();
+    m_PlaneMesh.reset();
+
+    m_DefaultTexture.Reset();
+    m_DirectXTexture.Reset();
+    m_EarthTexture.Reset();
+    m_MonaLisaTexture.Reset();
+
+    m_DepthBuffer.Reset();
+
+    m_RootSignature.Reset();
+
+    m_PipelineState.Reset();
 }
 
 void Tutorial3::OnUpdate( UpdateEventArgs& e )

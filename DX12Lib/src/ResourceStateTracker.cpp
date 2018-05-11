@@ -209,3 +209,8 @@ void ResourceStateTracker::RemoveGlobalResourceState(ID3D12Resource* resource)
         ms_GlobalResourceState.erase(resource);
     }
 }
+
+void ResourceStateTracker::OnDeviceLost()
+{
+    ms_GlobalResourceState.clear();
+}

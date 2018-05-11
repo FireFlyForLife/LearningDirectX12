@@ -37,11 +37,19 @@ void RootSignature::Destroy()
         }
     }
 
-    delete[] m_RootSignatureDesc.pParameters; 
-    m_RootSignatureDesc.pParameters = nullptr;
+    if ( m_RootSignatureDesc.pParameters )
+    {
+        delete[] m_RootSignatureDesc.pParameters;
+        m_RootSignatureDesc.pParameters = nullptr;
+        m_RootSignatureDesc.NumParameters = 0;
+    }
     
-    delete[] m_RootSignatureDesc.pStaticSamplers; 
-    m_RootSignatureDesc.pStaticSamplers = nullptr;
+    if ( m_RootSignatureDesc.pStaticSamplers )
+    {
+        delete[] m_RootSignatureDesc.pStaticSamplers;
+        m_RootSignatureDesc.pStaticSamplers = nullptr;
+        m_RootSignatureDesc.NumStaticSamplers = 0;
+    }
 }
 
 void RootSignature::SetRootSignatureDesc(
@@ -147,4 +155,11 @@ uint32_t RootSignature::GetNumDescriptors(uint32_t rootIndex) const
 {
     assert(rootIndex < 32);
     return m_NumDescriptorsPerTable[rootIndex];
+}
+
+void RootSignature::Reset()
+{
+    Destroy();
+
+    m_RootSignature.Reset();
 }

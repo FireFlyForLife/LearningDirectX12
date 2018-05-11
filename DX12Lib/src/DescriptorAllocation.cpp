@@ -76,7 +76,10 @@ bool DescriptorAllocation::IsNull() const
 // Get a descriptor at a particular offset in the allocation.
 D3D12_CPU_DESCRIPTOR_HANDLE DescriptorAllocation::GetDescriptorHandle( uint32_t offset ) const
 {
-    assert( offset < m_NumHandles );
+    if ( offset >= m_NumHandles )
+    {
+        assert( offset < m_NumHandles );
+    }
     return { m_Descriptor.ptr + ( m_DescriptorSize * offset ) };
 }
 

@@ -3,9 +3,11 @@
 #include "..\resource.h"
 
 #include <CommandQueue.h>
-#include <Game.h>
+#include <CommandList.h>
 #include <DescriptorAllocator.h>
 #include <DescriptorAllocatorPage.h>
+#include <Game.h>
+#include <ResourceStateTracker.h>
 #include <Window.h>
 
 constexpr wchar_t WINDOW_CLASS_NAME[] = L"DX12RenderWindowClass";
@@ -35,6 +37,7 @@ struct MakeWindow : public Window
 Application::Application(HINSTANCE hInst)
     : m_hInstance(hInst)
     , m_TearingSupported(false)
+    , m_DeviceLost(false)
 {
     // Windows 10 Creators update adds Per Monitor V2 DPI awareness context.
     // Using this awareness context allows the client area of the window 
@@ -105,6 +108,20 @@ void Application::Initialize()
 
     // Initialize frame counter 
     ms_FrameCount = 0;
+}
+
+void Application::Uninitialize()
+{
+    for ( int i = 0; i < D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES; ++i )
+    {
+        m_DescriptorAllocators[i].reset();
+    }
+
+    m_CopyCommandQueue.reset();
+    m_ComputeCommandQueue.reset();
+    m_DirectCommandQueue.reset();
+
+    m_d3d12Device.Reset();
 }
 
 void Application::Create(HINSTANCE hInst)
@@ -326,6 +343,12 @@ int Application::Run(std::shared_ptr<Game> pGame)
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
+
+        if ( m_DeviceLost )
+        {
+            HandleDeviceLost( pGame );
+            m_DeviceLost = false;
+        }
     }
 
     // Flush any commands in the commands queues before quiting.
@@ -407,6 +430,39 @@ UINT Application::GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE ty
     return m_d3d12Device->GetDescriptorHandleIncrementSize(type);
 }
 
+void Application::OnDeviceLost()
+{
+    m_DeviceLost = true;
+}
+
+bool Application::IsDeviceLost() const
+{
+    return m_DeviceLost;
+}
+
+void Application::HandleDeviceLost( std::shared_ptr<Game> pGame )
+{
+    Flush();
+
+    if ( pGame )
+    {
+        pGame->UnloadContent();
+        pGame->Destroy();
+    }
+
+    CommandList::OnDeviceLost();
+    ResourceStateTracker::OnDeviceLost();
+
+    Uninitialize();
+    Initialize();
+
+    if ( pGame )
+    {
+        pGame->Initialize();
+        pGame->LoadContent();
+    }
+}
+
 
 // Remove a window from our window lists.
 static void RemoveWindow(HWND hWnd)
@@ -454,6 +510,8 @@ MouseButtonEventArgs::MouseButton DecodeMouseButton(UINT messageID)
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
+    auto& app = Application::Get();
+
     WindowPtr pWindow;
     {
         WindowMap::iterator iter = gs_Windows.find(hwnd);
@@ -469,14 +527,26 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         {
         case WM_PAINT:
         {
-            ++Application::ms_FrameCount;
+            if ( !app.IsDeviceLost() )
+            {
+                ++Application::ms_FrameCount;
 
-            // Delta time will be filled in by the Window.
-            UpdateEventArgs updateEventArgs(0.0f, 0.0f, Application::ms_FrameCount);
-            pWindow->OnUpdate(updateEventArgs);
-            RenderEventArgs renderEventArgs(0.0f, 0.0f, Application::ms_FrameCount);
-            // Delta time will be filled in by the Window.
-            pWindow->OnRender(renderEventArgs);
+                // Delta time will be filled in by the Window.
+                UpdateEventArgs updateEventArgs( 0.0f, 0.0f, Application::ms_FrameCount );
+                pWindow->OnUpdate( updateEventArgs );
+                try
+                {
+                    RenderEventArgs renderEventArgs( 0.0f, 0.0f, Application::ms_FrameCount );
+                    // Delta time will be filled in by the Window.
+                    pWindow->OnRender( renderEventArgs );
+                } catch ( std::exception& e )
+                {
+                    std::string msg = "A exception was thrown:\n";
+                    msg += e.what();
+
+                    OutputDebugStringA( msg.c_str() );
+                }
+            }
         }
         break;
         case WM_SYSKEYDOWN:
@@ -612,9 +682,18 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM l
         {
             int width = ((int)(short)LOWORD(lParam));
             int height = ((int)(short)HIWORD(lParam));
+            try
+            {
+                ResizeEventArgs resizeEventArgs( width, height );
+                pWindow->OnResize( resizeEventArgs );
+            }
+            catch ( std::exception& e )
+            {
+                std::string msg = "A exception was thrown:\n";
+                msg += std::string(e.what()) + "\n";
 
-            ResizeEventArgs resizeEventArgs(width, height);
-            pWindow->OnResize(resizeEventArgs);
+                OutputDebugStringA( msg.c_str() );
+            }
         }
         break;
         case WM_DESTROY:

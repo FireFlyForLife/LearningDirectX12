@@ -119,6 +119,11 @@ public:
      */
     static void RemoveGlobalResourceState(ID3D12Resource* resource);
 
+    /**
+     * Release device dependent resources.
+     */
+    static void OnDeviceLost();
+
 protected:
 
 private:

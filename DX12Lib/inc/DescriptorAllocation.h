@@ -46,10 +46,10 @@ public:
     // (For internal use only).
     std::shared_ptr<DescriptorAllocatorPage> GetDescriptorAllocatorPage() const;
 
-private:
     // Free the descriptor back to the heap it came from.
     void Free();
 
+private:
     // The base descriptor.
     D3D12_CPU_DESCRIPTOR_HANDLE m_Descriptor;
     // The number of descriptors in this allocation.

@@ -29,6 +29,8 @@
  */
 #pragma once
 
+#include "Application.h"
+
 #include <cstdint>
 
 #define WIN32_LEAN_AND_MEAN
@@ -40,7 +42,15 @@ inline void ThrowIfFailed(HRESULT hr)
 {
     if (FAILED(hr))
     {
-        throw std::exception();
+        if ( hr == DXGI_ERROR_DEVICE_REMOVED ||
+             hr == DXGI_ERROR_DEVICE_RESET )
+        {
+            Application::Get().OnDeviceLost();
+        }
+        else
+        {
+            throw std::exception();
+        }
     }
 }
 

@@ -7,9 +7,11 @@
 
 Resource::Resource(const std::wstring& name)
     : m_ResourceName(name)
+    , m_d3d12ResourceDesc({})
 {}
 
 Resource::Resource(const D3D12_RESOURCE_DESC& resourceDesc, const D3D12_CLEAR_VALUE* clearValue, D3D12_RESOURCE_STATES initialState, const std::wstring& name)
+    : m_d3d12ResourceDesc(resourceDesc)
 {
     auto device = Application::Get().GetDevice();
 
@@ -21,7 +23,7 @@ Resource::Resource(const D3D12_RESOURCE_DESC& resourceDesc, const D3D12_CLEAR_VA
     ThrowIfFailed( device->CreateCommittedResource(
         &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
         D3D12_HEAP_FLAG_NONE,
-        &resourceDesc,
+        &m_d3d12ResourceDesc,
         initialState,
         m_d3d12ClearValue.get(),
         IID_PPV_ARGS(&m_d3d12Resource)
@@ -33,8 +35,13 @@ Resource::Resource(const D3D12_RESOURCE_DESC& resourceDesc, const D3D12_CLEAR_VA
 }
 
 Resource::Resource(Microsoft::WRL::ComPtr<ID3D12Resource> resource, const std::wstring& name)
-    : m_d3d12Resource(resource)
+    : m_d3d12Resource( resource )
+    , m_d3d12ResourceDesc( {} )
 {
+    if ( resource )
+    {
+        m_d3d12ResourceDesc = resource->GetDesc();
+    }
     SetName(name);
 }
 
@@ -42,17 +49,26 @@ Resource::Resource(const Resource& copy)
     : m_d3d12Resource(copy.m_d3d12Resource)
     , m_ResourceName(copy.m_ResourceName)
     , m_d3d12ClearValue(std::make_unique<D3D12_CLEAR_VALUE>(*copy.m_d3d12ClearValue))
+    , m_d3d12ResourceDesc( {} )
 {
-    int i = 3;
+    if ( m_d3d12Resource )
+    {
+        m_d3d12ResourceDesc = m_d3d12Resource->GetDesc();
+    }
 }
 
 Resource::Resource(Resource&& copy)
-    : m_d3d12Resource(copy.m_d3d12Resource)
-    , m_ResourceName(copy.m_ResourceName)
+    : m_d3d12Resource(std::move(copy.m_d3d12Resource))
+    , m_ResourceName(std::move(copy.m_ResourceName))
     , m_d3d12ClearValue(std::move(copy.m_d3d12ClearValue))
+    , m_d3d12ResourceDesc({})
 {
-    copy.m_d3d12Resource.Reset();
-    copy.m_ResourceName.clear();
+    if ( m_d3d12Resource )
+    {
+        m_d3d12ResourceDesc = m_d3d12Resource->GetDesc();
+    }
+
+    copy.m_d3d12ResourceDesc = {};
 }
 
 Resource& Resource::operator=(const Resource& other)
@@ -62,6 +78,7 @@ Resource& Resource::operator=(const Resource& other)
         m_d3d12Resource = other.m_d3d12Resource;
         m_ResourceName = other.m_ResourceName;
         m_d3d12ClearValue = std::make_unique<D3D12_CLEAR_VALUE>( *other.m_d3d12ClearValue );
+        m_d3d12ResourceDesc = other.m_d3d12ResourceDesc;
     }
 
     return *this;
@@ -71,12 +88,12 @@ Resource& Resource::operator=(Resource&& other)
 {
     if (this != &other)
     {
-        m_d3d12Resource = other.m_d3d12Resource;
-        m_ResourceName = other.m_ResourceName;
+        m_d3d12Resource = std::move(other.m_d3d12Resource);
+        m_ResourceName = std::move(other.m_ResourceName);
         m_d3d12ClearValue = std::move( other.m_d3d12ClearValue );
-
-        other.m_d3d12Resource.Reset();
-        other.m_ResourceName.clear();
+        m_d3d12ResourceDesc = other.m_d3d12ResourceDesc;
+        
+        other.m_d3d12ResourceDesc = {};
     }
 
     return *this;
@@ -90,7 +107,11 @@ Resource::~Resource()
 void Resource::SetD3D12Resource(Microsoft::WRL::ComPtr<ID3D12Resource> d3d12Resource, const D3D12_CLEAR_VALUE* clearValue )
 {
     m_d3d12Resource = d3d12Resource;
-    if ( m_d3d12ClearValue )
+    if ( m_d3d12Resource )
+    {
+        m_d3d12ResourceDesc = m_d3d12Resource->GetDesc();
+    }
+    if ( clearValue )
     {
         m_d3d12ClearValue = std::make_unique<D3D12_CLEAR_VALUE>( *clearValue );
     }
@@ -113,5 +134,4 @@ void Resource::SetName(const std::wstring& name)
 void Resource::Reset()
 {
     m_d3d12Resource.Reset();
-    m_d3d12ClearValue.reset();
 }

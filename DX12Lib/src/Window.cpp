@@ -369,7 +369,8 @@ UINT Window::Present()
 
     UINT syncInterval = m_VSync ? 1 : 0;
     UINT presentFlags = m_IsTearingSupported && !m_VSync ? DXGI_PRESENT_ALLOW_TEARING : 0;
-    ThrowIfFailed(m_dxgiSwapChain->Present(syncInterval, presentFlags));
+
+    ThrowIfFailed( m_dxgiSwapChain->Present( syncInterval, presentFlags ) );
 
     m_FenceValues[m_CurrentBackBufferIndex] = commandQueue->Signal();
     m_FrameValues[m_CurrentBackBufferIndex] = Application::GetFrameCount();
@@ -378,7 +379,6 @@ UINT Window::Present()
 
     commandQueue->WaitForFenceValue( m_FenceValues[m_CurrentBackBufferIndex] );
 
-    // TODO: Release stale descriptors
     Application::Get().ReleaseStaleDescriptors( m_FrameValues[m_CurrentBackBufferIndex] );
 
     return m_CurrentBackBufferIndex;

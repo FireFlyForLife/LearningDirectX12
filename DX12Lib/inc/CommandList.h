@@ -338,6 +338,10 @@ public:
         return m_GenerateMipsCommandList;
     }
 
+    // Release any device dependent resources.
+    // The texture cache needs to be cleared.
+    static void OnDeviceLost();
+
 protected:
 
 private:

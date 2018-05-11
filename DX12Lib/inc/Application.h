@@ -114,7 +114,19 @@ public:
         return ms_FrameCount;
     }
 
+    /**
+     * Called if the GPU device gets removed or reset.
+     */
+    void OnDeviceLost();
+
+    /**
+     * Check to see if the device is in a lost state.
+     */
+    bool IsDeviceLost() const;
+
 protected:
+
+    void HandleDeviceLost( std::shared_ptr<Game> pGame );
 
     // Create an application instance.
     Application(HINSTANCE hInst);
@@ -123,6 +135,8 @@ protected:
 
     // Initialize the application instance.
     void Initialize();
+    // Release device specific resources.
+    void Uninitialize();
 
     Microsoft::WRL::ComPtr<IDXGIAdapter4> GetAdapter(bool bUseWarp);
     Microsoft::WRL::ComPtr<ID3D12Device2> CreateDevice(Microsoft::WRL::ComPtr<IDXGIAdapter4> adapter);
@@ -144,6 +158,8 @@ private:
     std::unique_ptr<DescriptorAllocator> m_DescriptorAllocators[D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES];
 
     bool m_TearingSupported;
+
+    bool m_DeviceLost;
 
     static uint64_t ms_FrameCount;
 };

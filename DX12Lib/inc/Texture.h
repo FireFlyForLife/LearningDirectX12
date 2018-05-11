@@ -61,6 +61,9 @@ public:
      */
     virtual D3D12_CPU_DESCRIPTOR_HANDLE GetDepthStencilView() const;
 
+    // Free the handles.
+    virtual void Reset() override;
+
     static bool CheckSRVSupport(D3D12_FORMAT_SUPPORT1 formatSupport)
     {
         return ( ( formatSupport & D3D12_FORMAT_SUPPORT1_SHADER_SAMPLE ) != 0 ||
@@ -89,7 +92,6 @@ public:
 
     // Return a typeless format from the given format.
     static DXGI_FORMAT GetTypelessFormat(DXGI_FORMAT format);
-
 protected:
 
 private:

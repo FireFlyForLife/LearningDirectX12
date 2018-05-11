@@ -808,3 +808,7 @@ void CommandList::BindDescriptorHeaps()
     m_d3d12CommandList->SetDescriptorHeaps( numDescriptorHeaps, descriptorHeaps );
 }
 
+void CommandList::OnDeviceLost()
+{
+    ms_TextureCache.clear();
+}

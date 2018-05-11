@@ -40,6 +40,7 @@ CommandQueue::CommandQueue(D3D12_COMMAND_LIST_TYPE type)
 
 CommandQueue::~CommandQueue()
 {
+    int i = 3;
 }
 
 uint64_t CommandQueue::Signal()
@@ -69,8 +70,8 @@ void CommandQueue::Flush()
     while (!tmpQueue.empty())
     {
         auto entry = tmpQueue.front();
-        WaitForFenceValue(entry.fenceValue);
-        entry.commandList->ReleaseTrackedObjects();
+        WaitForFenceValue(entry.FenceValue);
+        entry.CommandList->ReleaseTrackedObjects();
         tmpQueue.pop();
     }
 
@@ -86,9 +87,9 @@ std::shared_ptr<CommandList> CommandQueue::GetCommandList()
     std::shared_ptr<CommandList> commandList;
 
     // If there is a command list on the queue.
-    if ( !m_CommandListQueue.empty() && IsFenceComplete(m_CommandListQueue.front().fenceValue))
+    if ( !m_CommandListQueue.empty() && IsFenceComplete(m_CommandListQueue.front().FenceValue))
     {
-        commandList = m_CommandListQueue.front().commandList;
+        commandList = m_CommandListQueue.front().CommandList;
         m_CommandListQueue.pop();
 
         commandList->Reset();
@@ -157,7 +158,7 @@ uint64_t CommandQueue::ExecuteCommandLists(const std::vector<std::shared_ptr<Com
     // Queue command lists for reuse.
     for (auto commandList : toBeQueued)
     {
-        m_CommandListQueue.emplace(CommandListEntry{ fenceValue, commandList });
+        m_CommandListQueue.emplace(fenceValue, commandList);
     }
 
     // If there are any command lists that generate mips then execute those

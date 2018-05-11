@@ -39,8 +39,13 @@ private:
     // Keep track of command allocators that are "in-flight"
     struct CommandListEntry
     {
-        uint64_t fenceValue;
-        std::shared_ptr<CommandList> commandList;
+        CommandListEntry( uint64_t fenceValue, std::shared_ptr<CommandList> commandList )
+            : FenceValue(fenceValue)
+            , CommandList(commandList)
+        {}
+
+        uint64_t FenceValue;
+        std::shared_ptr<CommandList> CommandList;
     };
 
     using CommandListQueue = std::queue<CommandListEntry>;

@@ -57,31 +57,26 @@ Texture::~Texture()
 void Texture::Resize(uint32_t width, uint32_t height, uint32_t depthOrArraySize )
 {
     // Resource can't be resized if it was never created in the first place.
-    if (m_d3d12Resource)
-    {
-        ResourceStateTracker::RemoveGlobalResourceState(m_d3d12Resource.Get());
+    ResourceStateTracker::RemoveGlobalResourceState(m_d3d12Resource.Get());
 
-        CD3DX12_RESOURCE_DESC resDesc(m_d3d12Resource->GetDesc());
+    m_d3d12ResourceDesc.Width = width;
+    m_d3d12ResourceDesc.Height = height;
+    m_d3d12ResourceDesc.DepthOrArraySize = depthOrArraySize;
 
-        resDesc.Width = width;
-        resDesc.Height = height;
-        resDesc.DepthOrArraySize = depthOrArraySize;
+    auto device = Application::Get().GetDevice();
 
-        auto device = Application::Get().GetDevice();
+    ThrowIfFailed( device->CreateCommittedResource(
+        &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+        D3D12_HEAP_FLAG_NONE,
+        &m_d3d12ResourceDesc,
+        D3D12_RESOURCE_STATE_COMMON,
+        m_d3d12ClearValue.get(),
+        IID_PPV_ARGS(&m_d3d12Resource)
+    ));
 
-        ThrowIfFailed( device->CreateCommittedResource(
-            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
-            D3D12_HEAP_FLAG_NONE,
-            &resDesc,
-            D3D12_RESOURCE_STATE_COMMON,
-            m_d3d12ClearValue.get(),
-            IID_PPV_ARGS(&m_d3d12Resource)
-        ));
+    ResourceStateTracker::AddGlobalResourceState(m_d3d12Resource.Get(), D3D12_RESOURCE_STATE_COMMON);
 
-        ResourceStateTracker::AddGlobalResourceState(m_d3d12Resource.Get(), D3D12_RESOURCE_STATE_COMMON);
-
-        CreateViews();
-    }
+    CreateViews();
 }
 
 // Get a UAV description that matches the resource description.
@@ -218,6 +213,17 @@ D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetDepthStencilView() const
 {
     return m_DepthStencilView.GetDescriptorHandle();
 }
+
+void Texture::Reset()
+{
+    m_ShaderResourceView.Free();
+    m_UnorderedAccessViews.Free();
+    m_RenderTargetView.Free();
+    m_DepthStencilView.Free();
+
+    Resource::Reset();
+}
+
 
 bool Texture::IsUAVCompatibleFormat(DXGI_FORMAT format)
 {

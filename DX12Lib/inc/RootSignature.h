@@ -43,6 +43,9 @@ public:
     uint32_t GetDescriptorTableBitMask(D3D12_DESCRIPTOR_HEAP_TYPE descriptorHeapType) const;
     uint32_t GetNumDescriptors(uint32_t rootIndex) const;
 
+    // Release device dependent resources.
+    void Reset();
+
 protected:
 
 private:
