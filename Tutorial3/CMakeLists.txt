@@ -5,6 +5,7 @@ set( HEADER_FILES
     inc/Light.h
     inc/Material.h
     inc/Tutorial3.h
+    inc/DebugRenderer.h
 )
 
 set( SRC_FILES
@@ -13,11 +14,14 @@ set( SRC_FILES
     src/Light.cpp
     src/Material.cpp
     src/Tutorial3.cpp
+    src/DebugRenderer.cpp
 )
 
 set( SHADER_FILES
     shaders/VertexShader.hlsl
     shaders/PixelShader.hlsl
+    shaders/DebugRenderer.VS.hlsl
+    shaders/DebugRenderer.PS.hlsl
 )
 
 source_group( "Resources\\Shaders" FILES ${SHADER_FILES} )
@@ -35,6 +39,14 @@ set_source_files_properties( shaders/VertexShader.hlsl PROPERTIES
 )
 
 set_source_files_properties( shaders/PixelShader.hlsl PROPERTIES 
+    VS_SHADER_TYPE Pixel
+)
+
+set_source_files_properties( shaders/DebugRenderer.VS.hlsl PROPERTIES 
+    VS_SHADER_TYPE Vertex
+)
+
+set_source_files_properties( shaders/DebugRenderer.PS.hlsl PROPERTIES 
     VS_SHADER_TYPE Pixel
 )
 

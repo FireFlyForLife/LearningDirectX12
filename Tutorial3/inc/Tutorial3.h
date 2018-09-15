@@ -10,6 +10,7 @@
 #include <RootSignature.h>
 #include <Texture.h>
 #include <VertexBuffer.h>
+#include <DebugRenderer.h>
 
 #include <DirectXMath.h>
 
@@ -89,6 +90,8 @@ private:
 
     D3D12_VIEWPORT m_Viewport;
     D3D12_RECT m_ScissorRect;
+
+	DebugRenderer m_DebugRenderer;
 
     Camera m_Camera;
     struct alignas( 16 ) CameraData

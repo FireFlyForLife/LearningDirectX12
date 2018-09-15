@@ -118,6 +118,10 @@ Tutorial3::~Tutorial3()
 
 bool Tutorial3::LoadContent()
 {
+	m_DebugRenderer.Initialize(m_RenderTarget, m_Viewport, m_ScissorRect);
+	m_DebugRenderer.AddLine({ -10, 0, 0 }, { 10, 1, 0 }, { 1, 0, 0, 0 });
+	m_DebugRenderer.AddLine({ 0, 2, 10 }, { 0, 0, -10 }, { 1, 1, 0, 0 });
+
     auto device = Application::Get().GetDevice();
     auto commandQueue = Application::Get().GetCommandQueue( D3D12_COMMAND_LIST_TYPE_COPY );
     auto commandList = commandQueue->GetCommandList();
@@ -577,6 +581,8 @@ void Tutorial3::OnRender( RenderEventArgs& e )
     }
 
     commandQueue->ExecuteCommandList( commandList );
+
+	m_DebugRenderer.Render(m_Camera);
 
     // Present
     m_pWindow->Present( m_RenderTarget.GetTexture(AttachmentPoint::Color0) );
