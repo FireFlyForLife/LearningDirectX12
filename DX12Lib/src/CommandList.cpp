@@ -105,6 +105,13 @@ void CommandList::FlushResourceBarriers()
     m_ResourceStateTracker->FlushResourceBarriers( *this );
 }
 
+void CommandList::ForceFlushPendingResourceBarriers()
+{
+	m_ResourceStateTracker->Lock();
+	m_ResourceStateTracker->FlushPendingResourceBarriers(*this);
+	m_ResourceStateTracker->Unlock();
+}
+
 void CommandList::CopyResource( Resource& dstRes, const Resource& srcRes )
 {
     TransitionBarrier( dstRes, D3D12_RESOURCE_STATE_COPY_DEST );
@@ -181,6 +188,8 @@ void CommandList::CopyBuffer( Buffer& buffer, size_t numElements, size_t element
         }
         TrackObject(d3d12Resource);
     }
+
+	ResourceStateTracker::AddGlobalResourceState(d3d12Resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
 
     buffer.SetD3D12Resource( d3d12Resource );
     buffer.CreateViews( numElements, elementSize );

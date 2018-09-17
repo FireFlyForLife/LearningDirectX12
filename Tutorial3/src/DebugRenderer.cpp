@@ -120,7 +120,7 @@ void DebugRenderer::Initialize(RenderTarget& renderTarget, D3D12_VIEWPORT viewpo
 
 	pipelineStateStream.pRootSignature = debugRootSignature.GetRootSignature().Get(); 
 	pipelineStateStream.InputLayout = { inputLayout, 2 };
-	pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+	pipelineStateStream.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
 	pipelineStateStream.VS = CD3DX12_SHADER_BYTECODE(debugVertexShaderBlob.Get());
 	pipelineStateStream.PS = CD3DX12_SHADER_BYTECODE(debugPixelShaderBlob.Get());
 	pipelineStateStream.DSVFormat = depthBufferFormat;
@@ -173,6 +173,8 @@ void DebugRenderer::Render(const Camera& camera)
 
 	commandList->SetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_LINELIST);
 	commandList->SetVertexBuffer(0, vertexBuffer);
+
+	commandList->ForceFlushPendingResourceBarriers();
 
 	commandList->Draw(static_cast<uint32_t>(lines.size() * 2));
 
