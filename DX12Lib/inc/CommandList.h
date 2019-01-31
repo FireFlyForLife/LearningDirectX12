@@ -88,11 +88,6 @@ public:
     void FlushResourceBarriers();
 
 	/**
-	 * Force the ResourceTracker 
-	 */
-	void ForceFlushPendingResourceBarriers();
-
-	/**
 	 * Copy resources.
 	 */
 	void CopyResource(Resource& dstRes, const Resource& srcRes);
