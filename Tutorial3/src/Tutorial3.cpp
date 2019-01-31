@@ -261,14 +261,14 @@ void Tutorial3::OnResize( ResizeEventArgs& e )
 
     if ( m_Width != e.Width || m_Height != e.Height )
     {
-        m_Width = e.Width;
-        m_Height = e.Height;
+        m_Width = std::max( 1, e.Width );
+        m_Height = std::max( 1, e.Height );
 
-        float aspectRatio = e.Width / (float)e.Height;
+        float aspectRatio = m_Width / (float)m_Height;
         m_Camera.set_Projection( 45.0f, aspectRatio, 0.1f, 100.0f );
 
         m_Viewport = CD3DX12_VIEWPORT( 0.0f, 0.0f,
-            static_cast<float>(e.Width), static_cast<float>(e.Height));
+            static_cast<float>(m_Width), static_cast<float>(m_Height));
 
         m_RenderTarget.Resize( m_Width, m_Height );
     }
@@ -578,6 +578,12 @@ void Tutorial3::OnRender( RenderEventArgs& e )
 
     commandQueue->ExecuteCommandList( commandList );
 
+    static bool showDemoWindow = false;
+    if (showDemoWindow)
+    {
+        ImGui::ShowDemoWindow(&showDemoWindow);
+    }
+
     // Present
     m_pWindow->Present( m_RenderTarget.GetTexture(AttachmentPoint::Color0) );
 }
@@ -588,61 +594,63 @@ void Tutorial3::OnKeyPressed( KeyEventArgs& e )
 {
     super::OnKeyPressed( e );
 
-    switch ( e.Key )
+    if ( !ImGui::GetIO().WantCaptureKeyboard )
     {
-        case KeyCode::Escape:
-            Application::Get().Quit( 0 );
-            break;
-        case KeyCode::Enter:
-            if ( e.Alt )
-            {
-        case KeyCode::F11:
-            if ( g_AllowFullscreenToggle )
-            {
-                m_pWindow->ToggleFullscreen();
-                g_AllowFullscreenToggle = false;
-            }
-            break;
-            }
-        case KeyCode::V:
-            m_pWindow->ToggleVSync();
-            break;
-        case KeyCode::R:
-            // Reset camera transform
-            m_Camera.set_Translation( m_pAlignedCameraData->m_InitialCamPos );
-            m_Camera.set_Rotation( m_pAlignedCameraData->m_InitialCamRot );
-            m_Pitch = 0.0f;
-            m_Yaw = 0.0f;
-            break;
-        case KeyCode::Up:
-        case KeyCode::W:
-            m_Forward = 1.0f;
-            break;
-        case KeyCode::Left:
-        case KeyCode::A:
-            m_Left = 1.0f;
-            break;
-        case KeyCode::Down:
-        case KeyCode::S:
-            m_Backward = 1.0f;
-            break;
-        case KeyCode::Right:
-        case KeyCode::D:
-            m_Right = 1.0f;
-            break;
-        case KeyCode::Q:
-            m_Down = 1.0f;
-            break;
-        case KeyCode::E:
-            m_Up = 1.0f;
-            break;
-        case KeyCode::Space:
-            m_AnimateLights = !m_AnimateLights;
-            break;
-        case KeyCode::ShiftKey:
-            m_Shift = true;
-            break;
-
+        switch ( e.Key )
+        {
+            case KeyCode::Escape:
+                Application::Get().Quit( 0 );
+                break;
+            case KeyCode::Enter:
+                if ( e.Alt )
+                {
+            case KeyCode::F11:
+                if ( g_AllowFullscreenToggle )
+                {
+                    m_pWindow->ToggleFullscreen();
+                    g_AllowFullscreenToggle = false;
+                }
+                break;
+                }
+            case KeyCode::V:
+                m_pWindow->ToggleVSync();
+                break;
+            case KeyCode::R:
+                // Reset camera transform
+                m_Camera.set_Translation( m_pAlignedCameraData->m_InitialCamPos );
+                m_Camera.set_Rotation( m_pAlignedCameraData->m_InitialCamRot );
+                m_Pitch = 0.0f;
+                m_Yaw = 0.0f;
+                break;
+            case KeyCode::Up:
+            case KeyCode::W:
+                m_Forward = 1.0f;
+                break;
+            case KeyCode::Left:
+            case KeyCode::A:
+                m_Left = 1.0f;
+                break;
+            case KeyCode::Down:
+            case KeyCode::S:
+                m_Backward = 1.0f;
+                break;
+            case KeyCode::Right:
+            case KeyCode::D:
+                m_Right = 1.0f;
+                break;
+            case KeyCode::Q:
+                m_Down = 1.0f;
+                break;
+            case KeyCode::E:
+                m_Up = 1.0f;
+                break;
+            case KeyCode::Space:
+                m_AnimateLights = !m_AnimateLights;
+                break;
+            case KeyCode::ShiftKey:
+                m_Shift = true;
+                break;
+        }
     }
 }
 
@@ -693,27 +701,33 @@ void Tutorial3::OnMouseMoved( MouseMotionEventArgs& e )
 
     const float mouseSpeed = 0.1f;
 
-    if ( e.LeftButton )
+    if ( !ImGui::GetIO().WantCaptureMouse )
     {
-        m_Pitch -= e.RelY * mouseSpeed;
+        if ( e.LeftButton )
+        {
+            m_Pitch -= e.RelY * mouseSpeed;
 
-        m_Pitch = clamp( m_Pitch, -90.0f, 90.0f );
+            m_Pitch = clamp( m_Pitch, -90.0f, 90.0f );
 
-        m_Yaw -= e.RelX * mouseSpeed;
+            m_Yaw -= e.RelX * mouseSpeed;
+        }
     }
 }
 
 
 void Tutorial3::OnMouseWheel( MouseWheelEventArgs& e )
 {
-    auto fov = m_Camera.get_FoV();
+    if ( !ImGui::GetIO().WantCaptureMouse )
+    {
+        auto fov = m_Camera.get_FoV();
 
-    fov -= e.WheelDelta;
-    fov = clamp( fov, 12.0f, 90.0f );
+        fov -= e.WheelDelta;
+        fov = clamp( fov, 12.0f, 90.0f );
 
-    m_Camera.set_FoV( fov );
+        m_Camera.set_FoV( fov );
 
-    char buffer[256];
-    sprintf_s( buffer, "FoV: %f\n", fov );
-    OutputDebugStringA( buffer );
+        char buffer[256];
+        sprintf_s( buffer, "FoV: %f\n", fov );
+        OutputDebugStringA( buffer );
+    }
 }

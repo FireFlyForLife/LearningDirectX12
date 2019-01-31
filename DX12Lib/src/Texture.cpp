@@ -3,6 +3,7 @@
 #include <Texture.h>
 
 #include <Application.h>
+#include <Helpers.h>
 #include <ResourceStateTracker.h>
 
 Texture::Texture( TextureUsage textureUsage, const std::wstring& name )
@@ -71,8 +72,8 @@ void Texture::Resize(uint32_t width, uint32_t height, uint32_t depthOrArraySize 
 
         CD3DX12_RESOURCE_DESC resDesc(m_d3d12Resource->GetDesc());
 
-        resDesc.Width = width;
-        resDesc.Height = height;
+        resDesc.Width = std::max( width, 1u );
+        resDesc.Height = std::max( height, 1u );
         resDesc.DepthOrArraySize = depthOrArraySize;
 
         auto device = Application::Get().GetDevice();
@@ -107,7 +108,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC GetUAVDesc(const D3D12_RESOURCE_DESC& resDesc, 
         if (resDesc.DepthOrArraySize > 1)
         {
             uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE1DARRAY;
-            uavDesc.Texture1DArray.ArraySize = resDesc.DepthOrArraySize;
+            uavDesc.Texture1DArray.ArraySize = resDesc.DepthOrArraySize - arraySlice;
             uavDesc.Texture1DArray.FirstArraySlice = arraySlice;
             uavDesc.Texture1DArray.MipSlice = mipSlice;
         }
@@ -121,7 +122,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC GetUAVDesc(const D3D12_RESOURCE_DESC& resDesc, 
         if (resDesc.DepthOrArraySize > 1)
         {
             uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-            uavDesc.Texture2DArray.ArraySize = resDesc.DepthOrArraySize;
+            uavDesc.Texture2DArray.ArraySize = resDesc.DepthOrArraySize - arraySlice;
             uavDesc.Texture2DArray.FirstArraySlice = arraySlice;
             uavDesc.Texture2DArray.PlaneSlice = planeSlice;
             uavDesc.Texture2DArray.MipSlice = mipSlice;
@@ -135,7 +136,7 @@ D3D12_UNORDERED_ACCESS_VIEW_DESC GetUAVDesc(const D3D12_RESOURCE_DESC& resDesc, 
         break;
     case D3D12_RESOURCE_DIMENSION_TEXTURE3D:
         uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-        uavDesc.Texture3D.WSize = resDesc.DepthOrArraySize;
+        uavDesc.Texture3D.WSize = resDesc.DepthOrArraySize - arraySlice;
         uavDesc.Texture3D.FirstWSlice = arraySlice;
         uavDesc.Texture3D.MipSlice = mipSlice;
         break;
@@ -159,36 +160,6 @@ void Texture::CreateViews()
         formatSupport.Format = desc.Format;
         ThrowIfFailed(device->CheckFeatureSupport(D3D12_FEATURE_FORMAT_SUPPORT, &formatSupport, sizeof(D3D12_FEATURE_DATA_FORMAT_SUPPORT) ));
 
-        if ( CheckSRVSupport(formatSupport.Support1) )
-        {
-            m_ShaderResourceView = app.AllocateDescriptors(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-            device->CreateShaderResourceView(m_d3d12Resource.Get(), nullptr, m_ShaderResourceView.GetDescriptorHandle());
-        }
-
-        if ((desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0 && 
-            CheckUAVSupport(formatSupport.Support1))
-        {
-            UINT planeCount = desc.PlaneCount(device.Get());
-            UINT arraySize = desc.ArraySize();
-            UINT mipLevels = desc.MipLevels;
-
-            m_UnorderedAccessViews = app.AllocateDescriptors(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, mipLevels * arraySize * planeCount );
-            for (UINT planeSlice = 0; planeSlice < planeCount; ++planeSlice)
-            {
-                for (UINT arraySlice = 0; arraySlice < arraySize; ++arraySlice)
-                {
-                    for (UINT mipSlice = 0; mipSlice < mipLevels; ++mipSlice)
-                    {
-                        auto uavDesc = GetUAVDesc(desc, mipSlice, arraySlice, planeSlice);
-                        device->CreateUnorderedAccessView( 
-                            m_d3d12Resource.Get(),
-                            nullptr, &uavDesc,
-                            m_UnorderedAccessViews.GetDescriptorHandle( desc.CalcSubresource( mipSlice, arraySlice, planeSlice ) ) );
-                    }
-                }
-            }
-        }
-
         if ((desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 &&
             CheckRTVSupport(formatSupport.Support1) )
         {
@@ -202,22 +173,76 @@ void Texture::CreateViews()
             device->CreateDepthStencilView(m_d3d12Resource.Get(), nullptr, m_DepthStencilView.GetDescriptorHandle());
         }
     }
+
+    std::lock_guard<std::mutex> lock(m_ShaderResourceViewsMutex);
+    std::lock_guard<std::mutex> guard(m_UnorderedAccessViewsMutex);
+
+    // SRVs and UAVs will be created as needed.
+    m_ShaderResourceViews.clear();
+    m_UnorderedAccessViews.clear();
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetShaderResourceView() const
+DescriptorAllocation Texture::CreateShaderResourceView(const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc) const
 {
-    return m_ShaderResourceView.GetDescriptorHandle();
+    auto& app = Application::Get();
+    auto device = app.GetDevice();
+    auto srv = app.AllocateDescriptors(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    device->CreateShaderResourceView(m_d3d12Resource.Get(), srvDesc, srv.GetDescriptorHandle() );
+
+    return srv;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetUnorderedAccessView(uint32_t subresource) const
+DescriptorAllocation Texture::CreateUnorderedAccessView(const D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc) const
 {
-    return m_UnorderedAccessViews.GetDescriptorHandle( subresource );
+    auto& app = Application::Get();
+    auto device = app.GetDevice();
+    auto uav = app.AllocateDescriptors(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+
+    device->CreateUnorderedAccessView(m_d3d12Resource.Get(), nullptr, uavDesc, uav.GetDescriptorHandle());
+
+    return uav;
 }
 
-D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetUnorderedAccessView(uint32_t mipSlice, uint32_t arraySlice, uint32_t planeSlice) const
+
+D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetShaderResourceView(const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc) const
 {
-    CD3DX12_RESOURCE_DESC desc(m_d3d12Resource->GetDesc());
-    return GetUnorderedAccessView(desc.CalcSubresource(mipSlice, arraySlice, planeSlice));
+    std::size_t hash = 0;
+    if (srvDesc)
+    {
+        hash = std::hash<D3D12_SHADER_RESOURCE_VIEW_DESC>{}(*srvDesc);
+    }
+
+    std::lock_guard<std::mutex> lock(m_ShaderResourceViewsMutex);
+
+    auto iter = m_ShaderResourceViews.find(hash);
+    if (iter == m_ShaderResourceViews.end())
+    {
+        auto srv = CreateShaderResourceView(srvDesc);
+        iter = m_ShaderResourceViews.insert({ hash, std::move(srv) }).first;
+    }
+
+    return iter->second.GetDescriptorHandle();
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetUnorderedAccessView(const D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc) const
+{
+    std::size_t hash = 0;
+    if (uavDesc)
+    {
+        hash = std::hash<D3D12_UNORDERED_ACCESS_VIEW_DESC>{}(*uavDesc);
+    }
+
+    std::lock_guard<std::mutex> guard(m_UnorderedAccessViewsMutex);
+
+    auto iter = m_UnorderedAccessViews.find(hash);
+    if (iter == m_UnorderedAccessViews.end())
+    {
+        auto uav = CreateUnorderedAccessView(uavDesc);
+        iter = m_UnorderedAccessViews.insert( { hash, std::move(uav) }).first;
+    }
+
+    return iter->second.GetDescriptorHandle();
 }
 
 D3D12_CPU_DESCRIPTOR_HANDLE Texture::GetRenderTargetView() const
@@ -238,6 +263,7 @@ bool Texture::IsUAVCompatibleFormat(DXGI_FORMAT format)
     case DXGI_FORMAT_R32G32B32A32_UINT:
     case DXGI_FORMAT_R32G32B32A32_SINT:
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
+//    case DXGI_FORMAT_R16G16B16A16_UNORM:
     case DXGI_FORMAT_R16G16B16A16_UINT:
     case DXGI_FORMAT_R16G16B16A16_SINT:
     case DXGI_FORMAT_R8G8B8A8_UNORM:
@@ -412,3 +438,25 @@ DXGI_FORMAT Texture::GetTypelessFormat(DXGI_FORMAT format)
 
     return typelessFormat;
 }
+
+DXGI_FORMAT Texture::GetUAVCompatableFormat(DXGI_FORMAT format)
+{
+    DXGI_FORMAT uavFormat = format;
+    
+    switch (format)
+    {
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8A8_UNORM:
+    case DXGI_FORMAT_B8G8R8X8_UNORM:
+    case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+    case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        uavFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+        break;
+    case DXGI_FORMAT_D32_FLOAT:
+        uavFormat = DXGI_FORMAT_R32_FLOAT;
+        break;
+    }
+
+    return uavFormat;
+}
+

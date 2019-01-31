@@ -6,6 +6,8 @@
 #include <CommandQueue.h>
 #include <CommandList.h>
 #include <Game.h>
+#include <GUI.h>
+#include <RenderTarget.h>
 #include <ResourceStateTracker.h>
 #include <Texture.h>
 
@@ -39,6 +41,12 @@ Window::~Window()
     assert(!m_hWnd && "Use Application::DestroyWindow before destruction.");
 }
 
+void Window::Initialize()
+{
+    m_GUI.Initialize( shared_from_this() );
+}
+
+
 HWND Window::GetWindowHandle() const
 {
     return m_hWnd;
@@ -64,6 +72,8 @@ void Window::Hide()
 
 void Window::Destroy()
 {
+    m_GUI.Destroy();
+
     if (auto pGame = m_pGame.lock())
     {
         // Notify the registered game that the window is being destroyed.
@@ -175,6 +185,8 @@ void Window::RegisterCallbacks(std::shared_ptr<Game> pGame)
 
 void Window::OnUpdate(UpdateEventArgs& e)
 {
+    m_GUI.NewFrame();
+
     m_UpdateClock.Tick();
 
     if (auto pGame = m_pGame.lock())
@@ -266,6 +278,8 @@ void Window::OnResize(ResizeEventArgs& e)
 
         Application::Get().Flush();
 
+        // Release all references to back buffer textures.
+        m_RenderTarget.AttachTexture( Color0, Texture() );
         for (int i = 0; i < BufferCount; ++i)
         {
             ResourceStateTracker::RemoveGlobalResourceState(m_BackBufferTextures[i].GetD3D12Resource().Get());
@@ -350,6 +364,12 @@ void Window::UpdateRenderTargetViews()
     }
 }
 
+const RenderTarget& Window::GetRenderTarget() const
+{
+    m_RenderTarget.AttachTexture( AttachmentPoint::Color0, m_BackBufferTextures[m_CurrentBackBufferIndex] );
+    return m_RenderTarget;
+}
+
 UINT Window::Present( const Texture& texture )
 {
     auto commandQueue = Application::Get().GetCommandQueue( D3D12_COMMAND_LIST_TYPE_DIRECT );
@@ -357,14 +377,22 @@ UINT Window::Present( const Texture& texture )
 
     auto& backBuffer = m_BackBufferTextures[m_CurrentBackBufferIndex];
 
-    if ( texture.GetD3D12ResourceDesc().SampleDesc.Count > 1 )
+    if( texture.IsValid() )
     {
-        commandList->ResolveSubresource( backBuffer, texture );
+        if ( texture.GetD3D12ResourceDesc().SampleDesc.Count > 1 )
+        {
+            commandList->ResolveSubresource( backBuffer, texture );
+        }
+        else
+        {
+            commandList->CopyResource( backBuffer, texture );
+        }
     }
-    else
-    {
-        commandList->CopyResource( backBuffer, texture );
-    }
+
+    RenderTarget renderTarget;
+    renderTarget.AttachTexture( AttachmentPoint::Color0, backBuffer );
+
+    m_GUI.Render( commandList, renderTarget );
 
     commandList->TransitionBarrier( backBuffer, D3D12_RESOURCE_STATE_PRESENT );
     commandQueue->ExecuteCommandList( commandList );

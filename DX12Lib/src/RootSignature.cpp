@@ -39,9 +39,16 @@ void RootSignature::Destroy()
 
     delete[] m_RootSignatureDesc.pParameters; 
     m_RootSignatureDesc.pParameters = nullptr;
+    m_RootSignatureDesc.NumParameters = 0;
     
     delete[] m_RootSignatureDesc.pStaticSamplers; 
     m_RootSignatureDesc.pStaticSamplers = nullptr;
+    m_RootSignatureDesc.NumStaticSamplers = 0;
+
+    m_DescriptorTableBitMask = 0;
+    m_SamplerTableBitMask = 0;
+
+    memset(m_NumDescriptorsPerTable, 0, sizeof(m_NumDescriptorsPerTable));
 }
 
 void RootSignature::SetRootSignatureDesc(
@@ -104,8 +111,11 @@ void RootSignature::SetRootSignatureDesc(
     UINT numStaticSamplers = rootSignatureDesc.NumStaticSamplers;
     D3D12_STATIC_SAMPLER_DESC* pStaticSamplers = numStaticSamplers > 0 ? new D3D12_STATIC_SAMPLER_DESC[numStaticSamplers] : nullptr;
 
-    memcpy(pStaticSamplers, rootSignatureDesc.pStaticSamplers,
-        sizeof(D3D12_STATIC_SAMPLER_DESC) * numStaticSamplers);
+    if ( pStaticSamplers )
+    {
+        memcpy( pStaticSamplers, rootSignatureDesc.pStaticSamplers,
+                sizeof( D3D12_STATIC_SAMPLER_DESC ) * numStaticSamplers );
+    }
 
     m_RootSignatureDesc.NumStaticSamplers = numStaticSamplers;
     m_RootSignatureDesc.pStaticSamplers = pStaticSamplers;

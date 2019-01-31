@@ -1,7 +1,34 @@
-/**
- * @brief A window for our application.
- */
 #pragma once
+
+/*
+ *  Copyright(c) 2018 Jeremiah van Oosten
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files(the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions :
+ *
+ *  The above copyright notice and this permission notice shall be included in
+ *  all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ *  IN THE SOFTWARE.
+ */
+
+/**
+ *  @file Window.h
+ *  @date October 24, 2018
+ *  @author Jeremiah van Oosten
+ *
+ *  @brief A window for our application.
+ */
 
 #define WIN32_LEAN_AND_MEAN
 #include <Windows.h>
@@ -11,13 +38,17 @@
 #include <dxgi1_5.h>
 
 #include <Events.h>
+#include <GUI.h>
 #include <HighResolutionClock.h>
+#include <RenderTarget.h>
 #include <Texture.h>
+
+#include <memory>
 
 class Game;
 class Texture;
 
-class Window
+class Window : public std::enable_shared_from_this<Window>
 {
 public:
     // Number of swapchain back buffers.
@@ -28,6 +59,11 @@ public:
     * @returns The handle to the window instance or nullptr if this is not a valid window.
     */
     HWND GetWindowHandle() const;
+
+    /**
+     * Initialize the window.
+     */
+    void Initialize();
 
     /**
     * Destroy this window.
@@ -66,10 +102,22 @@ public:
     void Hide();
 
     /**
+     * Get the render target of the window. This method should be called every
+     * frame since the color attachment point changes depending on the window's 
+     * current back buffer.
+     */
+    const RenderTarget& GetRenderTarget() const;
+
+    /**
      * Present the swapchain's back buffer to the screen.
      * Returns the current back buffer index after the present.
+     * 
+     * @param texture The texture to copy to the swap chain's backbuffer before
+     * presenting. By default, this is an empty texture. In this case, no copy 
+     * will be performed. Use the Window::GetRenderTarget method to get a render
+     * target for the window's color buffer. 
      */
-    UINT Present( const Texture& texture );
+    UINT Present( const Texture& texture = Texture() );
 
 protected:
     // The Window procedure needs to call protected methods of this class.
@@ -139,6 +187,8 @@ private:
 
     Microsoft::WRL::ComPtr<IDXGISwapChain4> m_dxgiSwapChain;
     Texture m_BackBufferTextures[BufferCount];
+    // Marked mutable to allow modification in a const function.
+    mutable RenderTarget m_RenderTarget;
 
     UINT m_CurrentBackBufferIndex;
 
@@ -147,5 +197,7 @@ private:
 
     int m_PreviousMouseX;
     int m_PreviousMouseY;
+
+    GUI m_GUI;
 
 };

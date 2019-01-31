@@ -9,6 +9,7 @@
 #include <DynamicDescriptorHeap.h>
 #include <GenerateMipsPSO.h>
 #include <IndexBuffer.h>
+#include <PanoToCubemapPSO.h>
 #include <RenderTarget.h>
 #include <Resource.h>
 #include <ResourceStateTracker.h>
@@ -17,18 +18,6 @@
 #include <Texture.h>
 #include <UploadBuffer.h>
 #include <VertexBuffer.h>
-
-#include <DirectXTex/DDSTextureLoader12.h>
-#include <DirectXTex/WICTextureLoader12.h>
-
-#include <d3dx12.h>
-
-#include <filesystem>
-#include <memory> // For std::unique_ptr
-#include <vector> // For std::vector
-
-namespace fs = std::experimental::filesystem;
-using namespace DirectX;
 
 std::map<std::wstring, ID3D12Resource* > CommandList::ms_TextureCache;
 std::mutex CommandList::ms_TextureCacheMutex;
@@ -173,6 +162,9 @@ void CommandList::CopyBuffer( Buffer& buffer, size_t numElements, size_t element
             subresourceData.RowPitch = bufferSize;
             subresourceData.SlicePitch = subresourceData.RowPitch;
 
+            m_ResourceStateTracker->TransitionResource(d3d12Resource.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+            FlushResourceBarriers();
+
             UpdateSubresources( m_d3d12CommandList.Get(), d3d12Resource.Get(),
                 uploadResource.Get(), 0, 0, 1, &subresourceData );
 
@@ -219,72 +211,96 @@ void CommandList::LoadTextureFromFile( Texture& texture, const std::wstring& fil
     fs::path filePath( fileName );
     if ( !fs::exists( filePath ) )
     {
-        throw std::invalid_argument( "Invalid filename specified." );
+        throw std::exception( "File not found." );
     }
+
+    std::lock_guard<std::mutex> lock(ms_TextureCacheMutex);
     auto iter = ms_TextureCache.find( fileName );
     if ( iter != ms_TextureCache.end() )
     {
-        texture.SetD3D12Resource( iter->second );
+        texture.SetTextureUsage(textureUsage);
+        texture.SetD3D12Resource(iter->second);
+        texture.CreateViews();
+        texture.SetName(fileName);
     }
     else
     {
+        TexMetadata metadata;
+        ScratchImage scratchImage;
         Microsoft::WRL::ComPtr<ID3D12Resource> textureResource;
-        std::unique_ptr<uint8_t[]> textureData;
-        std::vector<D3D12_SUBRESOURCE_DATA> subresourceData;
 
         if ( filePath.extension() == ".dds" )
         {
-            unsigned int loadFlags = DDS_LOADER_MIP_RESERVE;
-            if ( textureUsage == TextureUsage::Albedo )
-            {
-                loadFlags |= DDS_LOADER_FORCE_SRGB;
-            }
-            // Use DDS texture loader.
-            ThrowIfFailed( LoadDDSTextureFromFileEx( device.Get(),
-                                                     fileName.c_str(), 0, D3D12_RESOURCE_FLAG_NONE,
-                                                     loadFlags, &textureResource, textureData,
-                                                     subresourceData ) );
+            ThrowIfFailed( LoadFromDDSFile( fileName.c_str(), DDS_FLAGS_NONE, &metadata, scratchImage ) );
+        }
+        else if ( filePath.extension() == ".hdr" )
+        {
+            ThrowIfFailed( LoadFromHDRFile( fileName.c_str(), &metadata, scratchImage ) );
+        }
+        else if ( filePath.extension() == ".tga" )
+        {
+            ThrowIfFailed( LoadFromTGAFile( fileName.c_str(), &metadata, scratchImage ) );
         }
         else
         {
-            D3D12_SUBRESOURCE_DATA resourceData;
-
-            unsigned int loadFlags = WIC_LOADER_MIP_RESERVE;
-            if ( textureUsage == TextureUsage::Albedo )
-            {
-                loadFlags |= WIC_LOADER_FORCE_SRGB;
-            }
-            else if ( textureUsage == TextureUsage::Heightmap ||
-                      textureUsage == TextureUsage::Normalmap )
-            {
-                loadFlags |= WIC_LOADER_IGNORE_SRGB;
-            }
-
-            // Use WIC texture loader.
-            ThrowIfFailed( LoadWICTextureFromFileEx( device.Get(),
-                                                     fileName.c_str(), 0, D3D12_RESOURCE_FLAG_NONE,
-                                                     loadFlags, &textureResource, textureData,
-                                                     resourceData ) );
-
-            subresourceData.push_back( resourceData );
+            ThrowIfFailed( LoadFromWICFile( fileName.c_str(), WIC_FLAGS_NONE, &metadata, scratchImage ) );
         }
 
+        if ( textureUsage == TextureUsage::Albedo )
+        {
+            metadata.format = MakeSRGB( metadata.format );
+        }
+
+        D3D12_RESOURCE_DESC textureDesc = {};
+        switch ( metadata.dimension )
+        {
+            case TEX_DIMENSION_TEXTURE1D:
+                textureDesc = CD3DX12_RESOURCE_DESC::Tex1D( metadata.format, static_cast<UINT64>( metadata.width ), static_cast<UINT16>(metadata.arraySize) );
+                break;
+            case TEX_DIMENSION_TEXTURE2D:
+                textureDesc = CD3DX12_RESOURCE_DESC::Tex2D( metadata.format, static_cast<UINT64>( metadata.width ), static_cast<UINT>(metadata.height), static_cast<UINT16>(metadata.arraySize) );
+                break;
+            case TEX_DIMENSION_TEXTURE3D:
+                textureDesc = CD3DX12_RESOURCE_DESC::Tex3D( metadata.format, static_cast<UINT64>( metadata.width ), static_cast<UINT>(metadata.height), static_cast<UINT16>(metadata.depth) );
+                break;
+            default:
+                throw std::exception( "Invalid texture dimension." );
+                break;
+        }
+
+        ThrowIfFailed( device->CreateCommittedResource( &CD3DX12_HEAP_PROPERTIES( D3D12_HEAP_TYPE_DEFAULT ),
+                                                        D3D12_HEAP_FLAG_NONE,
+                                                        &textureDesc,
+                                                        D3D12_RESOURCE_STATE_COMMON,
+                                                        nullptr,
+                                                        IID_PPV_ARGS( &textureResource ) ) );
+
         // Update the global state tracker.
-        ResourceStateTracker::AddGlobalResourceState( textureResource.Get(), D3D12_RESOURCE_STATE_COPY_DEST );
+        ResourceStateTracker::AddGlobalResourceState( textureResource.Get(), D3D12_RESOURCE_STATE_COMMON );
 
         texture.SetTextureUsage( textureUsage );
         texture.SetD3D12Resource( textureResource );
         texture.CreateViews();
+        texture.SetName(fileName);
 
-        CopyTextureSubresource( texture, 0, static_cast<uint32_t>( subresourceData.size() ), subresourceData.data() );
+        std::vector<D3D12_SUBRESOURCE_DATA> subresources( scratchImage.GetImageCount() );
+        const Image* pImages = scratchImage.GetImages();
+        for ( int i = 0; i < scratchImage.GetImageCount(); ++i )
+        {
+            auto& subresource = subresources[i];
+            subresource.RowPitch = pImages[i].rowPitch;
+            subresource.SlicePitch = pImages[i].slicePitch;
+            subresource.pData = pImages[i].pixels;
+        }
+        
+        CopyTextureSubresource( texture, 0, static_cast<uint32_t>( subresources.size() ), subresources.data() );
 
-        if ( subresourceData.size() < textureResource->GetDesc().MipLevels )
+        if ( subresources.size() < textureResource->GetDesc().MipLevels )
         {
             GenerateMips( texture );
         }
 
         // Add the texture resource to the texture cache.
-        std::lock_guard<std::mutex> lock( ms_TextureCacheMutex );
         ms_TextureCache[fileName] = textureResource.Get();
     }
 }
@@ -293,11 +309,11 @@ void CommandList::GenerateMips( Texture& texture )
 {
     if ( m_d3d12CommandListType == D3D12_COMMAND_LIST_TYPE_COPY )
     {
-        if ( !m_GenerateMipsCommandList )
+        if ( !m_ComputeCommandList )
         {
-            m_GenerateMipsCommandList = Application::Get().GetCommandQueue( D3D12_COMMAND_LIST_TYPE_COMPUTE )->GetCommandList();
+            m_ComputeCommandList = Application::Get().GetCommandQueue( D3D12_COMMAND_LIST_TYPE_COMPUTE )->GetCommandList();
         }
-        m_GenerateMipsCommandList->GenerateMips( texture );
+        m_ComputeCommandList->GenerateMips( texture );
         return;
     }
 
@@ -350,7 +366,7 @@ void CommandList::GenerateMips_UAV( Texture& texture )
     Texture stagingTexture( stagingResource );
     // If the passed-in resource does not allow for UAV access
     // then create a staging resource that is used to generate
-    // the mip-map chain.
+    // the mipmap chain.
     if ( ( resourceDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS ) == 0 )
     {
         auto stagingDesc = resourceDesc;
@@ -370,6 +386,7 @@ void CommandList::GenerateMips_UAV( Texture& texture )
 
         stagingTexture.SetD3D12Resource( stagingResource );
         stagingTexture.CreateViews();
+        stagingTexture.SetName(L"Generate Mips UAV Staging Texture");
 
         CopyResource( stagingTexture, texture );
     }
@@ -394,7 +411,7 @@ void CommandList::GenerateMips_UAV( Texture& texture )
         // 0b11(3): Both width and height are odd.
         generateMipsCB.SrcDimension = ( srcHeight & 1 ) << 1 | ( srcWidth & 1 );
 
-        // How many mip map levels to compute this pass (max 4 mips per pass)
+        // How many mipmap levels to compute this pass (max 4 mips per pass)
         DWORD mipCount;
 
         // The number of times we can half the size of the texture and get
@@ -423,7 +440,15 @@ void CommandList::GenerateMips_UAV( Texture& texture )
         SetCompute32BitConstants( GenerateMips::GenerateMipsCB, generateMipsCB );
 
         SetShaderResourceView( GenerateMips::SrcMip, 0, stagingTexture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, srcMip, 1 );
-        SetUnorderedAccessView( GenerateMips::OutMip, 0, stagingTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, srcMip + 1, mipCount );
+        for ( uint32_t mip = 0; mip < mipCount; ++mip )
+        {
+            D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+            uavDesc.Format = resourceDesc.Format;
+            uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+            uavDesc.Texture2D.MipSlice = srcMip + mip + 1;
+
+            SetUnorderedAccessView(GenerateMips::OutMip, mip, stagingTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, srcMip + mip + 1, 1, &uavDesc );
+        }
         // Pad any unused mip levels with a default UAV. Doing this keeps the DX12 runtime happy.
         if ( mipCount < 4 )
         {
@@ -480,6 +505,9 @@ void CommandList::GenerateMips_BGR( Texture& texture )
         nullptr,
         IID_PPV_ARGS(&resourceCopy)
     ));
+
+    ResourceStateTracker::AddGlobalResourceState(resourceCopy.Get(), D3D12_RESOURCE_STATE_COMMON );
+
     Texture copyTexture(resourceCopy);
 
     // Create an alias for which to perform the copy operation.
@@ -497,6 +525,8 @@ void CommandList::GenerateMips_BGR( Texture& texture )
         nullptr,
         IID_PPV_ARGS(&aliasCopy)
     ));
+
+    ResourceStateTracker::AddGlobalResourceState(aliasCopy.Get(), D3D12_RESOURCE_STATE_COMMON);
 
     // Copy the original texture to the aliased texture.
     Texture aliasTexture(aliasCopy);
@@ -530,7 +560,7 @@ void CommandList::GenerateMips_sRGB( Texture& texture )
 
     // Create a copy of the original texture with UAV compatible format and UAV flags.
     auto copyDesc = resourceDesc;
-    copyDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    copyDesc.Format = Texture::GetUAVCompatableFormat(resourceDesc.Format);
     copyDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
     // Create the resource as a placed resource in a heap to perform an aliased copy.
@@ -558,6 +588,9 @@ void CommandList::GenerateMips_sRGB( Texture& texture )
         nullptr,
         IID_PPV_ARGS(&resourceCopy)
     ));
+
+    ResourceStateTracker::AddGlobalResourceState(resourceCopy.Get(), D3D12_RESOURCE_STATE_COMMON);
+
     Texture copyTexture(resourceCopy);
 
     // Create an alias for which to perform the copy operation.
@@ -572,6 +605,8 @@ void CommandList::GenerateMips_sRGB( Texture& texture )
         nullptr,
         IID_PPV_ARGS(&aliasCopy)
     ));
+
+    ResourceStateTracker::AddGlobalResourceState(aliasCopy.Get(), D3D12_RESOURCE_STATE_COMMON );
 
     // Copy the original texture to the aliased texture.
     Texture aliasTexture(aliasCopy);
@@ -593,6 +628,109 @@ void CommandList::GenerateMips_sRGB( Texture& texture )
     TrackResource(copyTexture);
     TrackResource(aliasTexture);
     TrackResource(texture);
+}
+
+void CommandList::PanoToCubemap(Texture& cubemapTexture, const Texture& panoTexture )
+{
+    if (m_d3d12CommandListType == D3D12_COMMAND_LIST_TYPE_COPY)
+    {
+        if (!m_ComputeCommandList)
+        {
+            m_ComputeCommandList = Application::Get().GetCommandQueue(D3D12_COMMAND_LIST_TYPE_COMPUTE)->GetCommandList();
+        }
+        m_ComputeCommandList->PanoToCubemap(cubemapTexture, panoTexture);
+        return;
+    }
+
+    if (!m_PanoToCubemapPSO)
+    {
+        m_PanoToCubemapPSO = std::make_unique<PanoToCubemapPSO>();
+    }
+
+    auto device = Application::Get().GetDevice();
+
+    auto cubemapResource = cubemapTexture.GetD3D12Resource();
+    if (!cubemapResource) return;
+
+    CD3DX12_RESOURCE_DESC cubemapDesc(cubemapResource->GetDesc());
+
+    auto stagingResource = cubemapResource;
+    Texture stagingTexture(stagingResource);
+    // If the passed-in resource does not allow for UAV access
+    // then create a staging resource that is used to generate
+    // the cubemap.
+    if ((cubemapDesc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) == 0)
+    {
+        auto stagingDesc = cubemapDesc;
+        stagingDesc.Format = Texture::GetUAVCompatableFormat(cubemapDesc.Format);
+        stagingDesc.Flags |= D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+
+        ThrowIfFailed(device->CreateCommittedResource(
+            &CD3DX12_HEAP_PROPERTIES(D3D12_HEAP_TYPE_DEFAULT),
+            D3D12_HEAP_FLAG_NONE,
+            &stagingDesc,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            nullptr,
+            IID_PPV_ARGS(&stagingResource)
+
+        ));
+
+        ResourceStateTracker::AddGlobalResourceState(stagingResource.Get(), D3D12_RESOURCE_STATE_COPY_DEST);
+
+        stagingTexture.SetD3D12Resource(stagingResource);
+        stagingTexture.CreateViews();
+        stagingTexture.SetName(L"Pano to Cubemap Staging Texture");
+
+        CopyResource(stagingTexture, cubemapTexture );
+    }
+
+    TransitionBarrier(stagingTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+
+    m_d3d12CommandList->SetPipelineState(m_PanoToCubemapPSO->GetPipelineState().Get());
+    SetComputeRootSignature(m_PanoToCubemapPSO->GetRootSignature());
+
+    PanoToCubemapCB panoToCubemapCB;
+
+    D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+    uavDesc.Format = Texture::GetUAVCompatableFormat(cubemapDesc.Format);
+    uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+    uavDesc.Texture2DArray.FirstArraySlice = 0;
+    uavDesc.Texture2DArray.ArraySize = 6;
+
+    for (uint32_t mipSlice = 0; mipSlice < cubemapDesc.MipLevels; )
+    {
+        // Maximum number of mips to generate per pass is 5.
+        uint32_t numMips = std::min<uint32_t>(5, cubemapDesc.MipLevels - mipSlice);
+
+        panoToCubemapCB.FirstMip = mipSlice;
+        panoToCubemapCB.CubemapSize = std::max<uint32_t>( static_cast<uint32_t>( cubemapDesc.Width ), cubemapDesc.Height) >> mipSlice;
+        panoToCubemapCB.NumMips = numMips;
+
+        SetCompute32BitConstants(PanoToCubemapRS::PanoToCubemapCB, panoToCubemapCB);
+
+        SetShaderResourceView(PanoToCubemapRS::SrcTexture, 0, panoTexture, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+
+        for ( uint32_t mip = 0; mip < numMips; ++mip )
+        {
+            uavDesc.Texture2DArray.MipSlice = mipSlice + mip;
+            SetUnorderedAccessView(PanoToCubemapRS::DstMips, mip, stagingTexture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, 0, 0, &uavDesc);
+        }
+
+        if (numMips < 5)
+        {
+            // Pad unused mips. This keeps DX12 runtime happy.
+            m_DynamicDescriptorHeap[D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV]->StageDescriptors(PanoToCubemapRS::DstMips, panoToCubemapCB.NumMips, 5 - numMips, m_PanoToCubemapPSO->GetDefaultUAV());
+        }
+
+        Dispatch(Math::DivideByMultiple(panoToCubemapCB.CubemapSize, 16), Math::DivideByMultiple(panoToCubemapCB.CubemapSize, 16), 6 );
+
+        mipSlice += numMips;
+    }
+
+    if (stagingResource != cubemapResource)
+    {
+        CopyResource(cubemapTexture, stagingTexture);
+    }
 }
 
 void CommandList::ClearTexture( const Texture& texture, const float clearColor[4])
@@ -757,60 +895,60 @@ void CommandList::SetPipelineState(Microsoft::WRL::ComPtr<ID3D12PipelineState> p
 void CommandList::SetGraphicsRootSignature( const RootSignature& rootSignature )
 {
     auto d3d12RootSignature = rootSignature.GetRootSignature().Get();
-    if ( m_CurrentRootSignature != d3d12RootSignature )
+    if ( m_RootSignature != d3d12RootSignature )
     {
-        m_CurrentRootSignature = d3d12RootSignature;
+        m_RootSignature = d3d12RootSignature;
 
         for ( int i = 0; i < D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES; ++i )
         {
             m_DynamicDescriptorHeap[i]->ParseRootSignature( rootSignature );
         }
 
-        m_d3d12CommandList->SetGraphicsRootSignature(m_CurrentRootSignature);
+        m_d3d12CommandList->SetGraphicsRootSignature(m_RootSignature);
 
-        TrackObject(m_CurrentRootSignature);
+        TrackObject(m_RootSignature);
     }
 }
 
 void CommandList::SetComputeRootSignature( const RootSignature& rootSignature )
 {
     auto d3d12RootSignature = rootSignature.GetRootSignature().Get();
-    if ( m_CurrentRootSignature != d3d12RootSignature )
+    if ( m_RootSignature != d3d12RootSignature )
     {
-        m_CurrentRootSignature = d3d12RootSignature;
+        m_RootSignature = d3d12RootSignature;
 
         for ( int i = 0; i < D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES; ++i )
         {
             m_DynamicDescriptorHeap[i]->ParseRootSignature( rootSignature );
         }
 
-        m_d3d12CommandList->SetComputeRootSignature(m_CurrentRootSignature);
+        m_d3d12CommandList->SetComputeRootSignature(m_RootSignature);
 
-        TrackObject(m_CurrentRootSignature);
+        TrackObject(m_RootSignature);
     }
 }
-
 
 void CommandList::SetShaderResourceView( uint32_t rootParameterIndex,
                                          uint32_t descriptorOffset,
                                          const Resource& resource,
                                          D3D12_RESOURCE_STATES stateAfter,
-                                         uint32_t firstSubresource,
-                                         uint32_t numSubresources )
+                                         UINT firstSubresource,
+                                         UINT numSubresources,
+                                         const D3D12_SHADER_RESOURCE_VIEW_DESC* srv)
 {
-    if ( numSubresources < D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES )
+    if (numSubresources < D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES)
     {
-        for ( uint32_t i = 0; i < numSubresources; ++i )
+        for (uint32_t i = 0; i < numSubresources; ++i)
         {
-            TransitionBarrier( resource, stateAfter, firstSubresource + i );
+            TransitionBarrier(resource, stateAfter, firstSubresource + i);
         }
     }
     else
     {
-        TransitionBarrier( resource, stateAfter );
+        TransitionBarrier(resource, stateAfter);
     }
 
-    m_DynamicDescriptorHeap[D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV]->StageDescriptors( rootParameterIndex, descriptorOffset, 1, resource.GetShaderResourceView() );
+    m_DynamicDescriptorHeap[D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV]->StageDescriptors( rootParameterIndex, descriptorOffset, 1, resource.GetShaderResourceView( srv ) );
 
     TrackResource(resource);
 }
@@ -819,8 +957,9 @@ void CommandList::SetUnorderedAccessView( uint32_t rootParameterIndex,
                                           uint32_t descrptorOffset,
                                           const Resource& resource,
                                           D3D12_RESOURCE_STATES stateAfter,
-                                          uint32_t firstSubresource,
-                                          uint32_t numSubresources )
+                                          UINT firstSubresource,
+                                          UINT numSubresources,
+                                          const D3D12_UNORDERED_ACCESS_VIEW_DESC* uav)
 {
     if ( numSubresources < D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES )
     {
@@ -834,7 +973,7 @@ void CommandList::SetUnorderedAccessView( uint32_t rootParameterIndex,
         TransitionBarrier( resource, stateAfter );
     }
 
-    m_DynamicDescriptorHeap[D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV]->StageDescriptors( rootParameterIndex, descrptorOffset, numSubresources, resource.GetUnorderedAccessView( firstSubresource ) );
+    m_DynamicDescriptorHeap[D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV]->StageDescriptors( rootParameterIndex, descrptorOffset, 1, resource.GetUnorderedAccessView( uav ) );
 
     TrackResource(resource);
 }
@@ -852,8 +991,7 @@ void CommandList::SetRenderTarget(const RenderTarget& renderTarget )
     {
         auto& texture = textures[i];
 
-        auto d3d12Resource = texture.GetD3D12Resource();
-        if ( d3d12Resource )
+        if ( texture.IsValid() )
         {
             TransitionBarrier( texture, D3D12_RESOURCE_STATE_RENDER_TARGET );
             renderTargetDescriptors.push_back( texture.GetRenderTargetView() );
@@ -873,19 +1011,16 @@ void CommandList::SetRenderTarget(const RenderTarget& renderTarget )
         TrackResource(depthTexture);
     }
 
+    D3D12_CPU_DESCRIPTOR_HANDLE* pDSV = depthStencilDescriptor.ptr != 0 ? &depthStencilDescriptor : nullptr;
+
     m_d3d12CommandList->OMSetRenderTargets( static_cast<UINT>( renderTargetDescriptors.size() ),
-        renderTargetDescriptors.data(), FALSE, &depthStencilDescriptor );
+        renderTargetDescriptors.data(), FALSE, pDSV );
 }
 
 void CommandList::Draw( uint32_t vertexCount, uint32_t instanceCount, uint32_t startVertex, uint32_t startInstance )
 {
     FlushResourceBarriers();
 
-    if ( m_PreviousRootSignature != m_CurrentRootSignature )
-    {
-        m_d3d12CommandList->SetGraphicsRootSignature( m_CurrentRootSignature );
-        m_PreviousRootSignature = m_CurrentRootSignature;
-    }
     for ( int i = 0; i < D3D12_DESCRIPTOR_HEAP_TYPE_NUM_TYPES; ++i )
     {
         m_DynamicDescriptorHeap[i]->CommitStagedDescriptorsForDraw( *this );
@@ -956,8 +1091,8 @@ void CommandList::Reset()
         m_DescriptorHeaps[i] = nullptr;
     }
 
-    m_CurrentRootSignature = nullptr;
-    m_GenerateMipsCommandList = nullptr;
+    m_RootSignature = nullptr;
+    m_ComputeCommandList = nullptr;
 }
 
 void CommandList::TrackObject(Microsoft::WRL::ComPtr<ID3D12Object> object)
@@ -1000,4 +1135,3 @@ void CommandList::BindDescriptorHeaps()
 
     m_d3d12CommandList->SetDescriptorHeaps( numDescriptorHeaps, descriptorHeaps );
 }
-

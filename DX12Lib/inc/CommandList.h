@@ -1,9 +1,36 @@
-/**
- * CommandList class encapsulates a ID3D12GraphicsCommandList2 interface.
- * The CommandList class provides additional functionality that makes working with
- * DirectX 12 applications easier.
- */
 #pragma once
+
+/*
+ *  Copyright(c) 2018 Jeremiah van Oosten
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files(the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions :
+ *
+ *  The above copyright notice and this permission notice shall be included in
+ *  all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ *  IN THE SOFTWARE.
+ */
+
+/**
+ *  @file CommandList.h
+ *  @date October 22, 2018
+ *  @author Jeremiah van Oosten
+ *
+ *  @brief CommandList class encapsulates a ID3D12GraphicsCommandList2 interface.
+ *  The CommandList class provides additional functionality that makes working with
+ *  DirectX 12 applications easier.
+ */
 
 #include "TextureUsage.h"
 
@@ -21,6 +48,7 @@ class ConstantBuffer;
 class DynamicDescriptorHeap;
 class GenerateMipsPSO;
 class IndexBuffer;
+class PanoToCubemapPSO;
 class RenderTarget;
 class Resource;
 class ResourceStateTracker;
@@ -168,6 +196,11 @@ public:
     void GenerateMips( Texture& texture );
 
     /**
+     * Generate a cubemap texture from a panoramic (equirectangular) texture.
+     */
+    void PanoToCubemap(Texture& cubemap, const Texture& pano);
+
+    /**
      * Copy subresource data to a texture.
      */
     void CopyTextureSubresource( Texture& texture, uint32_t firstSubresource, uint32_t numSubresources, D3D12_SUBRESOURCE_DATA* subresourceData );
@@ -279,10 +312,11 @@ public:
         uint32_t rootParameterIndex,
         uint32_t descriptorOffset,
         const Resource& resource,
-        D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE | 
-                                           D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
-        uint32_t firstSubresource = 0,
-        uint32_t numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES 
+        D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE |
+        D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE,
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_SHADER_RESOURCE_VIEW_DESC* srv = nullptr
     );
 
     /**
@@ -293,13 +327,13 @@ public:
         uint32_t descrptorOffset,
         const Resource& resource, 
         D3D12_RESOURCE_STATES stateAfter = D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        uint32_t firstSubresource = 0, 
-        uint32_t numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES 
+        UINT firstSubresource = 0,
+        UINT numSubresources = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        const D3D12_UNORDERED_ACCESS_VIEW_DESC* uav = nullptr
     );
 
     /**
      * Set the render targets for the graphics rendering pipeline.
-     * TODO: Create a RenderTarget class.
      */
     void SetRenderTarget( const RenderTarget& renderTarget );
 
@@ -351,7 +385,7 @@ public:
 
     std::shared_ptr<CommandList> GetGenerateMipsCommandList() const
     {
-        return m_GenerateMipsCommandList;
+        return m_ComputeCommandList;
     }
 
 protected:
@@ -383,12 +417,11 @@ private:
     // Mips can't be generated on copy queues but must be generated on compute or
     // direct queues. In this case, a Compute command list is generated and executed 
     // after the copy queue is finished uploading the first sub resource.
-    std::shared_ptr<CommandList> m_GenerateMipsCommandList;
+    std::shared_ptr<CommandList> m_ComputeCommandList;
 
     // Keep track of the currently bound root signatures to minimize root
     // signature changes.
-    ID3D12RootSignature* m_CurrentRootSignature;
-    ID3D12RootSignature* m_PreviousRootSignature;
+    ID3D12RootSignature* m_RootSignature;
 
     // Resource created in an upload heap. Useful for drawing of dynamic geometry
     // or for uploading constant buffer data that changes every draw call.
@@ -410,6 +443,8 @@ private:
 
 	// Pipeline state object for Mip map generation.
 	std::unique_ptr<GenerateMipsPSO> m_GenerateMipsPSO;
+    // Pipeline state object for converting panorama (equirectangular) to cubemaps
+    std::unique_ptr<PanoToCubemapPSO> m_PanoToCubemapPSO;
 
     // Objects that are being tracked by a command list that is "in-flight" on 
     // the command-queue and cannot be deleted. To ensure objects are not deleted 

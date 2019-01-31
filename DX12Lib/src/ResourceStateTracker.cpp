@@ -33,6 +33,7 @@ void ResourceStateTracker::ResourceBarrier(const D3D12_RESOURCE_BARRIER& barrier
             if ( transitionBarrier.Subresource == D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES &&
                  !resourceState.SubresourceState.empty() )
             {
+                // First transition all of the subresources if they are different than the StateAfter.
                 for ( auto subresourceState : resourceState.SubresourceState )
                 {
                     if ( transitionBarrier.StateAfter != subresourceState.second )
@@ -73,22 +74,22 @@ void ResourceStateTracker::ResourceBarrier(const D3D12_RESOURCE_BARRIER& barrier
     }
 }
 
-void ResourceStateTracker::TransitionResource(const Resource& resource, D3D12_RESOURCE_STATES stateAfter, UINT subResource )
+void ResourceStateTracker::TransitionResource( ID3D12Resource* resource, D3D12_RESOURCE_STATES stateAfter, UINT subResource )
 {
-    auto pResource = resource.GetD3D12Resource().Get();
-    if ( pResource)
+    if ( resource )
     {
-        ResourceBarrier(CD3DX12_RESOURCE_BARRIER::Transition(pResource, D3D12_RESOURCE_STATE_COMMON, stateAfter, subResource));
+        ResourceBarrier( CD3DX12_RESOURCE_BARRIER::Transition( resource, D3D12_RESOURCE_STATE_COMMON, stateAfter, subResource ) );
     }
+}
+
+void ResourceStateTracker::TransitionResource( const Resource& resource, D3D12_RESOURCE_STATES stateAfter, UINT subResource )
+{
+    TransitionResource( resource.GetD3D12Resource().Get(), stateAfter, subResource );
 }
 
 void ResourceStateTracker::UAVBarrier(const Resource* resource )
 {
     ID3D12Resource* pResource = resource != nullptr ? resource->GetD3D12Resource().Get() : nullptr;
-    if (resource)
-    {
-        pResource = resource->GetD3D12Resource().Get();
-    }
 
     ResourceBarrier(CD3DX12_RESOURCE_BARRIER::UAV(pResource));
 }
@@ -200,18 +201,14 @@ void ResourceStateTracker::Reset()
 
 void ResourceStateTracker::Lock()
 {
-    assert(!ms_IsLocked);
-
     ms_GlobalMutex.lock();
     ms_IsLocked = true;
 }
 
 void ResourceStateTracker::Unlock()
 {
-    assert(ms_IsLocked);
-
-    ms_IsLocked = false;
     ms_GlobalMutex.unlock();
+    ms_IsLocked = false;
 }
 
 void ResourceStateTracker::AddGlobalResourceState(ID3D12Resource* resource, D3D12_RESOURCE_STATES state)

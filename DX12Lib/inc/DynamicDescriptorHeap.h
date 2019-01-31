@@ -1,11 +1,38 @@
-/**
- * The DynamicDescriptorHeap is a GPU visible descriptor heap that allows for
- * staging of CPU visible descriptors that need to be uploaded before a Draw
- * or Dispatch command is executed.
- * The DynamicDescriptorHeap class is based on the one provided by the MiniEngine:
- * https://github.com/Microsoft/DirectX-Graphics-Samples
- */
 #pragma once
+
+/*
+ *  Copyright(c) 2018 Jeremiah van Oosten
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files(the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions :
+ *
+ *  The above copyright notice and this permission notice shall be included in
+ *  all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ *  IN THE SOFTWARE.
+ */
+
+/**
+ *  @file DynamicDescriptorHeap.h
+ *  @date October 22, 2018
+ *  @author Jeremiah van Oosten
+ *
+ *  @brief The DynamicDescriptorHeap is a GPU visible descriptor heap that allows for
+ *  staging of CPU visible descriptors that need to be uploaded before a Draw
+ *  or Dispatch command is executed.
+ *  The DynamicDescriptorHeap class is based on the one provided by the MiniEngine:
+ *  https://github.com/Microsoft/DirectX-Graphics-Samples
+ */
 
 #include "d3dx12.h"
 
@@ -30,7 +57,7 @@ public:
     /**
      * Stages a contiguous range of CPU visible descriptors.
      * Descriptors are not copied to the GPU visible descriptor heap until
-     * the CopyAndBindStagedDescriptors function is called.
+     * the CommitStagedDescriptors function is called.
      */
     void StageDescriptors(uint32_t rootParameterIndex, uint32_t offset, uint32_t numDescriptors, const D3D12_CPU_DESCRIPTOR_HANDLE srcDescriptors);
 
@@ -54,11 +81,11 @@ public:
      * This is useful for the
      *   * ID3D12GraphicsCommandList::ClearUnorderedAccessViewFloat
      *   * ID3D12GraphicsCommandList::ClearUnorderedAccessViewUint
-     * methods which which require both a CPU and GPU visible descriptors for a 
-     * UAV resource.
+     * methods which require both a CPU and GPU visible descriptors for a UAV 
+     * resource.
      * 
      * @param commandList The command list is required in case the GPU visible
-     * descriptor needs to be updated on the command list.
+     * descriptor heap needs to be updated on the command list.
      * @param cpuDescriptor The CPU descriptor to copy into a GPU visible 
      * descriptor heap.
      * 
@@ -89,7 +116,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> CreateDescriptorHeap();
 
     // Compute the number of stale descriptors that need to be copied
-    // to GPU visible descriptor heaps.
+    // to GPU visible descriptor heap.
     uint32_t ComputeStaleDescriptorCount() const;
 
     /**
@@ -122,12 +149,6 @@ private:
         D3D12_CPU_DESCRIPTOR_HANDLE* BaseDescriptor;
     };
 
-    // Describe the type of command list being used to stage the descriptors.
-    // Valid values are:
-    //   * D3D12_COMMAND_LIST_TYPE_DIRECT
-    //   * D3D12_COMMAND_LIST_TYPE_COMPUTE
-    D3D12_COMMAND_LIST_TYPE m_CommandListType;
-
     // Describes the type of descriptors that can be staged using this 
     // dynamic descriptor heap.
     // Valid values are:
@@ -149,9 +170,12 @@ private:
     // Descriptor handle cache per descriptor table.
     DescriptorTableCache m_DescriptorTableCache[MaxDescriptorTables];
 
+    // Each bit in the bit mask represents the index in the root signature
+    // that contains a descriptor table.
+    uint32_t m_DescriptorTableBitMask;
     // Each bit set in the bit mask represents a descriptor table
-    // in the root signature that needs to be bound to the command list
-    // before rendering or dispatch.
+    // in the root signature that has changed since the last time the 
+    // descriptors were copied.
     uint32_t m_StaleDescriptorTableBitMask;
 
     using DescriptorHeapPool = std::queue< Microsoft::WRL::ComPtr<ID3D12DescriptorHeap> >;

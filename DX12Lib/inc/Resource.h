@@ -1,8 +1,35 @@
-/**
- * A wrapper for a DX12 resource.
- * This provides a base class for all other resource types (Buffers & Textures).
- */
 #pragma once
+
+/*
+ *  Copyright(c) 2018 Jeremiah van Oosten
+ *
+ *  Permission is hereby granted, free of charge, to any person obtaining a copy
+ *  of this software and associated documentation files(the "Software"), to deal
+ *  in the Software without restriction, including without limitation the rights
+ *  to use, copy, modify, merge, publish, distribute, sublicense, and / or sell
+ *  copies of the Software, and to permit persons to whom the Software is
+ *  furnished to do so, subject to the following conditions :
+ *
+ *  The above copyright notice and this permission notice shall be included in
+ *  all copies or substantial portions of the Software.
+ *
+ *  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ *  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ *  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.IN NO EVENT SHALL THE
+ *  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ *  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ *  IN THE SOFTWARE.
+ */
+
+/**
+ *  @file Resource.h
+ *  @date October 24, 2018
+ *  @author Jeremiah van Oosten
+ *
+ *  @brief A wrapper for a DX12 resource. This provides a base class for all 
+ *  other resource types (Buffers & Textures).
+ */
 
 #include <d3d12.h>
 #include <wrl.h>
@@ -24,6 +51,14 @@ public:
     Resource& operator=(Resource&& other);
 
     virtual ~Resource();
+
+    /**
+     * Check to see if the underlying resource is valid.
+     */
+    bool IsValid() const
+    {
+        return ( m_d3d12Resource != nullptr );
+    }
 
     // Get access to the underlying D3D12 resource
     Microsoft::WRL::ComPtr<ID3D12Resource> GetD3D12Resource() const
@@ -49,14 +84,19 @@ public:
 
     /**
      * Get the SRV for a resource.
+     * 
+     * @param srvDesc The description of the SRV to return. The default is nullptr 
+     * which returns the default SRV for the resource (the SRV that is created when no 
+     * description is provided.
      */
-    virtual D3D12_CPU_DESCRIPTOR_HANDLE GetShaderResourceView() const = 0;
+    virtual D3D12_CPU_DESCRIPTOR_HANDLE GetShaderResourceView( const D3D12_SHADER_RESOURCE_VIEW_DESC* srvDesc = nullptr ) const = 0;
 
     /**
      * Get the UAV for a (sub)resource.
+     * 
+     * @param uavDesc The description of the UAV to return.
      */
-    virtual D3D12_CPU_DESCRIPTOR_HANDLE GetUnorderedAccessView(uint32_t subresource ) const = 0;
-    virtual D3D12_CPU_DESCRIPTOR_HANDLE GetUnorderedAccessView(uint32_t mipSlice, uint32_t arraySlice, uint32_t planeSlice) const = 0;
+    virtual D3D12_CPU_DESCRIPTOR_HANDLE GetUnorderedAccessView( const D3D12_UNORDERED_ACCESS_VIEW_DESC* uavDesc = nullptr ) const = 0;
 
     /**
      * Set the name of the resource. Useful for debugging purposes.
